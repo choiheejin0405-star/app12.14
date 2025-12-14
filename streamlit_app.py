@@ -15,8 +15,7 @@ st.set_page_config(
 )
 
 # API 엔드포인트
-API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-
+API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
 # 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
