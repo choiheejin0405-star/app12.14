@@ -16,44 +16,74 @@ st.set_page_config(page_title="4.우리 몸의 구조와 기능", page_icon="�
 st.title("4.우리 몸의 구조와 기능")
 st.caption("선생님과 함께 우리 몸에 대해 재미있게 알아보아요!")
 
-# 3. 모델 연결 (오류 해결 및 최적화 버전 ⭐)
+# 3. 모델 연결 (선생님 요청: 사용 가능한 모델 직접 탐색 방식 ⭐)
 @st.cache_resource
 def get_model():
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    # 1순위: 빠르고 성능 좋은 Flash
-    # 2순위: 똑똑한 Pro
-    # 3순위: 구형 Pro (안정성)
-    candidate_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
-    
     selected_model = None
     connected_name = ""
+    
+    try:
+        # [핵심 기능] 내 계정에서 사용 가능한 모든 모델을 조회합니다.
+        # "generateContent" (대화 기능)를 지원하는 놈들만 추려냅니다.
+        my_available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                my_available_models.append(m)
 
-    # 모델 목록을 순서대로 테스트
-    for model_name in candidate_models:
-        try:
-            temp_model = genai.GenerativeModel(model_name)
-            # 실제로 대화가 되는지 테스트 발사
-            temp_model.generate_content("test")
-            selected_model = temp_model
-            connected_name = model_name
-            break # 성공하면 여기서 멈춤
-        except Exception:
-            continue # 실패하면 다음 모델로 넘어감
+        # 사용 가능한 모델이 하나도 없다면?
+        if not my_available_models:
+            return None, "사용 가능한 모델을 찾을 수 없음"
+
+        # [똑똑한 선택 전략]
+        # 조회된 목록(my_available_models) 중에서 가장 좋은 걸 순서대로 찾습니다.
+        
+        # 1순위: 1.5 Flash (빠르고 최신)
+        for m in my_available_models:
+            if 'gemini-1.5-flash' in m.name:
+                selected_model = genai.GenerativeModel(m.name)
+                connected_name = m.name
+                break
+        
+        # 1순위가 없으면 -> 2순위: 1.5 Pro (똑똑함)
+        if selected_model is None:
+            for m in my_available_models:
+                if 'gemini-1.5-pro' in m.name:
+                    selected_model = genai.GenerativeModel(m.name)
+                    connected_name = m.name
+                    break
+        
+        # 2순위도 없으면 -> 3순위: 그냥 Gemini Pro
+        if selected_model is None:
+            for m in my_available_models:
+                if 'gemini-pro' in m.name:
+                    selected_model = genai.GenerativeModel(m.name)
+                    connected_name = m.name
+                    break
+        
+        # 아무것도 매칭이 안 되면 -> 그냥 목록의 첫 번째 놈을 무조건 잡습니다. (뭐라도 연결!)
+        if selected_model is None:
+            first_model = my_available_models[0]
+            selected_model = genai.GenerativeModel(first_model.name)
+            connected_name = f"{first_model.name} (자동 선택됨)"
+
+    except Exception as e:
+        return None, str(e)
 
     return selected_model, connected_name
 
-# 모델 불러오기
+# 모델 불러오기 실행
 model, model_name = get_model()
 
 if model is None:
-    st.error("😭 AI 모델 연결에 실패했어요. 잠시 후 다시 시도해주시거나 API 키를 확인해주세요.")
+    st.error(f"😭 모델 연결 실패: {model_name}\nAPI 키를 다시 확인하거나 잠시 후 시도해주세요.")
     st.stop()
 else:
-    # (선생님 확인용) 왼쪽 사이드바에 연결된 모델 이름 표시
-    st.sidebar.success(f"✅ 시스템 정상 가동\n(연결된 모델: {model_name})")
+    # 성공하면 어떤 모델을 찾았는지 사이드바에 표시
+    st.sidebar.success(f"✅ 내 컴퓨터 맞춤 연결!\n모델명: {model_name}")
 
-# 4. 자료 자동 읽기 함수 (PDF, DOCX, TXT)
+# 4. 자료 자동 읽기 함수
 @st.cache_data(show_spinner=False)
 def load_data():
     folder_path = 'data'
@@ -63,7 +93,6 @@ def load_data():
         return ""
 
     files = os.listdir(folder_path)
-    # 과학 관련 핵심 단어가 있는 파일만 골라 읽기
     KEYWORDS = ["뼈", "근육", "소화", "심장", "호흡", "배설", "뇌", "신경", "감각"]
 
     for filename in files:
@@ -83,20 +112,17 @@ def load_data():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
             
-            # 키워드가 포함된 내용만 학습 자료에 추가
             if any(k in content for k in KEYWORDS):
                 combined_text += f"\n\n--- [참고 자료: {filename}] ---\n{content}"
         except Exception:
             pass 
 
-    # 너무 길면 자르기 (토큰 제한 방지)
     if len(combined_text) > 60000:
         combined_text = combined_text[:60000] + "\n...(이하 생략)..."
         
     return combined_text
 
-# 5. 시스템 프롬프트 (선생님이 원하시던 상세 기능 포함 ⭐)
-# 자료 로딩
+# 5. 시스템 프롬프트 (교육 및 윤리 기능 완비)
 if "knowledge" not in st.session_state:
     with st.spinner("선생님이 자료를 챙겨오고 있어요... 📚"):
         st.session_state.knowledge = load_data()
@@ -122,7 +148,7 @@ system_prompt = f"""
 5. **질문 유도**: 설명이 끝난 후에는 "혹시 더 궁금한 게 있니?" 또는 관련된 흥미로운 질문을 던져 대화를 이어가세요.
 """
 
-# 6. 대화 처리 부분
+# 6. 대화 처리
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "안녕! 반가워. 선생님이랑 우리 몸에 대해 재미있게 이야기 나눠볼까? 혹시 궁금한 점이 있니? 😊"}
@@ -141,18 +167,13 @@ if prompt := st.chat_input("질문이나 대답을 입력하세요"):
     with st.chat_message("assistant", avatar="🧑‍🏫"):
         msg_box = st.empty()
         try:
-            # 프롬프트 구성
             full_prompt = system_prompt + f"\n\n학생 말: {prompt}"
-            
-            # 답변 생성
             response = model.generate_content(full_prompt, stream=True)
             full_response = ""
             for chunk in response:
                 full_response += chunk.text
                 msg_box.markdown(full_response + "▌")
             msg_box.markdown(full_response)
-            
-            # 대화 기록 저장
             st.session_state.messages.append({"role": "model", "content": full_response})     
         except Exception as e:
             msg_box.error(f"답변을 만드는 중 문제가 생겼어요: {e}")
