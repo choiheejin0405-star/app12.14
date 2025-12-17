@@ -68,42 +68,49 @@ def load_data_from_folder():
         
     return combined_text
 
-# 3. 모델 자동 검색 및 연결 (완전 수정됨 ⭐)
+# 3. 모델 자동 검색 및 연결 (안전장치 강화됨 ⭐)
 if not GOOGLE_API_KEY:
     st.error("🚨 선생님! 코드 윗부분에 API 키를 입력해주세요.")
     st.stop()
 
-# (이 부분이 핵심! 사용 가능한 모델을 직접 찾습니다)
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    found_model_name = None
-    
-    # 1. 현재 계정에서 쓸 수 있는 모든 모델 목록을 가져옵니다.
-    for m in genai.list_models():
-        # 대화(generateContent)가 가능한 모델인지 확인
-        if 'generateContent' in m.supported_generation_methods:
-            # 우선순위: flash -> pro -> 그냥 gemini 순서로 찾기
-            if 'gemini-1.5-flash' in m.name:
-                found_model_name = m.name
-                break # 찾으면 즉시 중단
-            elif 'gemini-1.5-pro' in m.name and found_model_name is None:
-                found_model_name = m.name
-            elif 'gemini-pro' in m.name and found_model_name is None:
-                found_model_name = m.name
-    
-    # 만약 위의 조건에 맞는 게 없으면, 목록의 첫 번째 것을 그냥 씁니다.
-    if found_model_name is None:
-        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        if all_models:
-            found_model_name = all_models[0]
-        else:
-            st.error("😭 사용 가능한 AI 모델을 찾을 수 없어요. API 키 권한을 확인해주세요.")
-            st.stop()
+    # 우선순위: 1.5 Flash -> 1.5 Pro -> Pro (구형이지만 안정적)
+    target_models = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-pro"]
+    model = None
+    connected_model_name = ""
 
-    # 찾은 모델로 연결!
-    model = genai.GenerativeModel(found_model_name)
-    st.sidebar.success(f"✅ 자동 연결됨: {found_model_name}")
+    # 1. 내가 원하는 모델 순서대로 연결 시도
+    for target in target_models:
+        try:
+            temp_model = genai.GenerativeModel(target)
+            temp_model.generate_content("test") # 테스트 발사
+            model = temp_model
+            connected_model_name = target
+            break
+        except Exception:
+            continue
+    
+    # 2. 다 실패하면, 진짜 아무거나 잡히는 거 연결 (구조 요청)
+    if model is None:
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    # 'vision' 같은 특수 모델 제외하고 텍스트 되는 것 찾기
+                    if 'gemini' in m.name:
+                        model = genai.GenerativeModel(m.name)
+                        connected_model_name = f"{m.name} (비상연결)"
+                        break
+        except:
+            pass
+
+    # 3. 그래도 없으면 에러 표시
+    if model is None:
+        st.error("😭 연결 가능한 AI 모델을 찾을 수 없어요. 잠시 후 다시 시도하거나 API 키를 확인해주세요.")
+        st.stop()
+    else:
+        st.sidebar.success(f"✅ 연결됨: {connected_model_name}")
 
     # 자료 읽기 시작
     if "local_knowledge" not in st.session_state:
@@ -116,7 +123,7 @@ try:
                 st.warning("⚠️ 'data' 폴더가 비어있거나 없어요. 챗봇이 기본 지식으로만 대답합니다.")
 
 except Exception as e:
-    st.error(f"모델 연결 오류: {e}\n\n(API 키가 정확한지, 인터넷이 연결되었는지 확인해주세요.)")
+    st.error(f"초기 설정 오류: {e}")
     st.stop()
 
 # 4. 시스템 프롬프트 (윤리 규정 포함)
@@ -160,7 +167,6 @@ if prompt := st.chat_input("질문이나 대답을 입력하세요"):
     with st.chat_message("assistant", avatar="🧑‍🏫"):
         msg_box = st.empty()
         try:
-            # 프롬프트와 사용자 입력을 합쳐서 보냄
             full_prompt = system_prompt + f"\n\n학생 말: {prompt}"
             response = model.generate_content(full_prompt, stream=True)
             full_response = ""
@@ -170,5 +176,4 @@ if prompt := st.chat_input("질문이나 대답을 입력하세요"):
             msg_box.markdown(full_response)
             st.session_state.messages.append({"role": "model", "content": full_response})     
         except Exception as e:
-            # 오류가 나면 사용자에게 친절하게 알림
-            st.error(f"답변을 만드는 중 문제가 생겼어요: {e}")
+            msg_box.error(f"답변 생성 중 오류: {e}")
